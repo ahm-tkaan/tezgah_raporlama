@@ -204,36 +204,61 @@ def visualize_weekly_comparison(
                         sorted_stops = np.append(sorted_stops, stop)
                 
                 # Kategorik ekseni oluştur
+                data = data.copy()  # Yeni bir kopya oluştur
                 data['Duruş Adı'] = pd.Categorical(data['Duruş Adı'], categories=sorted_stops, ordered=True)
                 
                 # Sıralı veriyi kullanarak grafik oluştur
                 data = data.sort_values('Duruş Adı')
         
-        # Çubuk grafiğini oluştur
-        ax = sns.barplot(data=data, x='Duruş Adı', y='Süre (Dakika)', hue='Hafta', palette=palet)
-    
-        # Y-ekseni üst sınırını genişlet
-        max_height = max([p.get_height() for p in ax.patches]) if ax.patches else 0
-        ax.set_ylim(0, max_height * 1.1)  # Y-ekseni üst sınırını %10 arttır
-    
-        # Çubukların üstüne dik metin ekle
-        for i, p in enumerate(ax.patches):
-            # Her çubuğa farklı bir ofset ekleyerek konumlandırma
-            offset = (i % len(weeks)) * 5  # Haftaların sayısına göre ofset belirleme
-            height = p.get_height()
-            # Yüksekliği sıfırdan büyük olan çubuklar için metin ekle
-            if height > 0:
-                ax.annotate(f'{height:.0f}', 
-                            (p.get_x() + p.get_width() / 2, height + offset), 
-                            ha='center', va='bottom', 
-                            fontsize=10, color='black', 
-                            rotation=egiklik,  # Metni belirtilen açıda yazdır
-                            xytext=(0, 5), textcoords='offset points')
-    
+        # Kategorik değişken olarak X ekseni için indeks oluştur
+        category_data = data.copy()
+        categories = category_data['Duruş Adı'].unique()
+        
+        # X ekseni etiketleri ve pozisyonları
+        x_positions = np.arange(len(categories))
+        
+        # Haftalara göre renk ata
+        colors = sns.color_palette(palet, len(weeks))
+        
+        # Her hafta için ayrı çubuk çiz
+        bar_width = 0.8 / len(weeks)  # Çubuk genişliği
+        
+        # Hafta başına çubuklar
+        for i, week in enumerate(weeks):
+            week_data = category_data[category_data['Hafta'] == week]
+            
+            # Her kategori için değer bul
+            heights = []
+            for cat in categories:
+                cat_data = week_data[week_data['Duruş Adı'] == cat]
+                if not cat_data.empty:
+                    heights.append(cat_data['Süre (Dakika)'].iloc[0])
+                else:
+                    heights.append(0)
+            
+            # Çubukları çiz
+            x_pos = x_positions - 0.4 + (i + 0.5) * bar_width
+            bars = plt.bar(x_pos, heights, width=bar_width, 
+                         color=colors[i], label=f'Hafta {week}')
+            
+            # Değerleri çubukların üzerine ekle
+            for j, height in enumerate(heights):
+                if height > 0:
+                    plt.text(x_pos[j], height + 5, f'{height:.0f}', 
+                           ha='center', va='bottom', 
+                           fontsize=9, rotation=egiklik)
+        
+        # X ekseni etiketlerini ayarla
+        plt.xticks(x_positions, categories, rotation=45, ha='right')
+        
+        # Başlık ve açıklamalar
         plt.title(f'{gozlemlenen} - 4 Haftalık En Büyük 10 Duruş Karşılaştırması')
-        plt.xticks(rotation=45, ha='right')
+        plt.xlabel('Duruş Adı')
+        plt.ylabel('Süre (Dakika)')
         plt.legend(title='Hafta')
-        plt.tight_layout()
+        
+        # Alt boşluğu artır
+        plt.subplots_adjust(bottom=0.3)
         
         if save:
             plt.savefig(os.path.join(folder_path, f"{gozlemlenen} - 4 HAFTALIK.png"), dpi=300, bbox_inches='tight')
@@ -290,22 +315,34 @@ def visualize_bar(
     if buna is None:
         buna = len(data)
     
+    # Veriyi filtrele
+    filtered_data = data.iloc[bundan:buna].copy()
+    
+    # Veri yoksa uyarı ver ve çık
+    if filtered_data.empty:
+        logger.warning(f"Grafik için veri bulunamadı: {baslik}")
+        return
+    
     # Renk paleti oluştur
-    filtered_data = data.iloc[bundan:buna]
-    colors_palette = sns.color_palette(colors, len(filtered_data["İş Merkezi Kodu "]))
+    colors_palette = sns.color_palette(colors, len(filtered_data))
     
     # Yüzde hesapla
-    filtered_data = filtered_data.copy()  # Orijinal DataFrame'i değiştirmemek için
     filtered_data["Yüzde"] = (filtered_data["Süre (Dakika)"] / total_time) * 100
     
+    # X ekseni değerlerini merkeze hizala
+    plt.figure(figsize=(12, 8))
+    
     # Bar grafiği çizdir
-    bars = plt.bar(filtered_data["İş Merkezi Kodu "], filtered_data["Süre (Dakika)"], color=colors_palette)
+    bars = plt.bar(range(len(filtered_data)), filtered_data["Süre (Dakika)"], color=colors_palette)
+    
+    # X ekseni etiketlerini merkeze hizala
+    plt.xticks(range(len(filtered_data)), filtered_data["İş Merkezi Kodu "], rotation=45, ha='right')
     
     if text:
         # Yüzdeleri her bir barın üstüne ekle
-        for bar in bars:
+        for i, bar in enumerate(bars):
             height = bar.get_height()
-            percentage = (height / total_time) * 100  # Yüzde hesaplama
+            percentage = filtered_data["Yüzde"].iloc[i]  # Hesaplanmış yüzdeyi kullan
             plt.text(
                 bar.get_x() + bar.get_width() / 2, height, 
                 f"{height} ({percentage:.1f}%)",  # Hem süre hem de yüzde gösterme
@@ -317,7 +354,7 @@ def visualize_bar(
     plt.xlabel("İş Merkezi Kodu", fontsize=12)
     plt.ylabel("Süre (Dakika)", fontsize=12)
     
-    plt.xticks(rotation=45, ha='right')
+    # Boşlukları ayarla
     plt.tight_layout()
     
     if save:
@@ -393,28 +430,36 @@ def plot_bar(
         # Süreye göre büyükten küçüğe sırala
         filtered_data = filtered_data.sort_values(by=duration_column, ascending=False)
         
-        # Grafik boyutunu artır - daha fazla yükseklik ve genişlik ekle
-        plt.figure(figsize=(12, 8))  # Boyutu 10x6'dan 12x8'e çıkar
+        # Grafik boyutunu artır
+        plt.figure(figsize=(14, 9))  # Daha geniş bir grafik
         
         # Renk paleti dinamik olarak oluştur
-        pastel_colors = sns.color_palette("pastel", n_colors=len(filtered_data[stoppage_column].unique()))
+        pastel_colors = sns.color_palette("pastel", n_colors=len(filtered_data))
+        
+        # X ekseni değerlerini hazırla
+        x_values = range(len(filtered_data))
         
         # Çubuk grafiğini çiz
-        ax = sns.barplot(
-            x=filtered_data[stoppage_column],
-            y=filtered_data[duration_column],
-            palette=pastel_colors,
-            hue=filtered_data[stoppage_column],
-            dodge=False,
-            legend=False  # Uyarıyı engellemek için eklendi
+        bars = plt.bar(
+            x_values,
+            filtered_data[duration_column],
+            color=pastel_colors
+        )
+
+        # X ekseni etiketlerini ayarla
+        plt.xticks(
+            x_values,
+            filtered_data[stoppage_column],
+            rotation=75,
+            ha='right'  # Sağa hizalama
         )
 
         # Etiketleri ekle
-        for index, value in enumerate(filtered_data[duration_column]):
-            percentage = filtered_data["Yüzde"].iloc[index]
+        for i, value in enumerate(filtered_data[duration_column]):
+            percentage = filtered_data["Yüzde"].iloc[i]
             plt.text(
-                index, 
-                value + 10,  # Değerin biraz üzerine yerleştir
+                i, 
+                value + 5,  # Değerin biraz üzerine yerleştir
                 f'{value:.0f} dk\n({percentage:.1f}%)', 
                 ha='center',
                 fontsize=9
@@ -425,15 +470,12 @@ def plot_bar(
         plt.xlabel("Duruş Adı", fontsize=12)
         plt.ylabel("Süre (Dakika)", fontsize=12)
         
-        # X ekseni etiketlerini düzelt - daha dik bir açı ve daha alt hizalama
-        plt.xticks(rotation=75, ha='right')  # 45 yerine 75 derece döndür
-        
         # Y ekseni üst sınırını ayarla
         max_value = filtered_data[duration_column].max()
         plt.ylim(0, max_value * 1.2)  # %20 margin ekle
         
-        # Alt boşluğu artır etiketlerin taşmaması için
-        plt.tight_layout(pad=3.0, rect=[0, 0.05, 1, 0.95])  # Alt kenar boşluğunu artır
+        # Alt ve üst boşlukları ayarla
+        plt.subplots_adjust(bottom=0.3, top=0.9)  # Altta daha fazla boşluk bırak
         
         if save:
             plt.savefig(os.path.join(folder_path, f"{code}.png"), dpi=300, bbox_inches='tight')
