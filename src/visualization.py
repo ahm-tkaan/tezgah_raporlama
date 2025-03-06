@@ -39,7 +39,8 @@ def visualize_pie(
     baslik: str = "Pasta Grafik",
     save: bool = True, 
     show: bool = True,
-    category_column: str = None
+    category_column: str = None,
+    custom_folder: str = None  # Yeni parametre: Özel klasör yolu
 ) -> None:
     """
     Duruş sürelerini pasta grafik olarak görselleştirir.
@@ -51,11 +52,15 @@ def visualize_pie(
         save: Grafiği kaydetme bayrağı
         show: Grafiği gösterme bayrağı
         category_column: Kategori sütunu adı (None ise otomatik tespit edilir)
+        custom_folder: Özel klasör yolu (None değilse, varsayılan klasör seçimi yerine bu kullanılır)
     """
     logger.info(f"Pasta grafik oluşturuluyor: {baslik}")
     
     # Klasör yolunu belirleme
-    if "KISIM" in baslik:
+    if custom_folder is not None:
+        # Özel klasör yolu belirtilmişse onu kullan
+        folder_path = custom_folder
+    elif "KISIM" in baslik:
         folder_path = 'Raporlar/Kısımlar/Son Hafta'
     else:
         folder_path = 'Raporlar/Genel'

@@ -254,6 +254,39 @@ def main() -> None:
         )
         
         # En az ve en çok duruş yapan tezgahlar karşılaştırması - çubuk grafik
+        # Her bir tezgah için duruş nedenleri pasta grafikleri
+        print("\nHer tezgah için duruş nedenleri pasta grafikleri oluşturuluyor...")
+        unique_machines = latest_week_df["İş Merkezi Kodu "].unique()
+
+        # Tezgahlar için pasta grafik klasörünü oluştur
+        tezgah_pasta_path = "Raporlar/Tezgahlar/Son Hafta Pasta"
+        os.makedirs(tezgah_pasta_path, exist_ok=True)
+
+        for machine_code in unique_machines:
+            # Her tezgah için veriyi filtrele
+            machine_data = latest_week_df[latest_week_df["İş Merkezi Kodu "] == machine_code]
+            
+            # ÇALIŞMA SÜRESİ dışındaki duruşları filtrele
+            machine_data = machine_data[machine_data["Duruş Adı"] != "ÇALIŞMA SÜRESİ"]
+            
+            # Toplam süreyi kontrol et
+            if machine_data["Süre (Dakika)"].sum() > 0:
+                # Duruş adlarına göre grupla ve süreleri topla
+                machine_stop_summary = machine_data.groupby("Duruş Adı")["Süre (Dakika)"].sum().reset_index()
+                
+                # Pasta grafiğini oluştur ve özel klasöre kaydet
+                visualize_pie(
+                    machine_stop_summary,
+                    threshold=3,  # %3'ten küçük olanları "Diğer" kategorisinde topla
+                    baslik=f"{machine_code} Duruş Nedenleri",
+                    save=args.save_plots,
+                    show=args.show_plots,
+                    category_column="Duruş Adı",
+                    custom_folder=tezgah_pasta_path  # Özel klasör yolu belirtiyoruz
+                )
+                
+                logger.info(f"{machine_code} tezgahı için duruş nedenleri pasta grafiği oluşturuldu.")
+
         visualize_top_bottom_machines(
             tezgah_sureleri,
             save=args.save_plots, 
@@ -298,37 +331,7 @@ def main() -> None:
             save=args.save_plots, 
             show=args.show_plots
         )
-        # Her bir tezgah için duruş nedenleri pasta grafikleri
-        print("\nHer tezgah için duruş nedenleri pasta grafikleri oluşturuluyor...")
-        unique_machines = latest_week_df["İş Merkezi Kodu "].unique()
-        
-        # Tezgahlar için pasta grafik klasörünü oluştur
-        tezgah_pasta_path = "Raporlar/Tezgahlar/Son Hafta Pasta"
-        os.makedirs(tezgah_pasta_path, exist_ok=True)
-        
-        for machine_code in unique_machines:
-            # Her tezgah için veriyi filtrele
-            machine_data = latest_week_df[latest_week_df["İş Merkezi Kodu "] == machine_code]
-            
-            # ÇALIŞMA SÜRESİ dışındaki duruşları filtrele
-            machine_data = machine_data[machine_data["Duruş Adı"] != "ÇALIŞMA SÜRESİ"]
-            
-            # Toplam süreyi kontrol et
-            if machine_data["Süre (Dakika)"].sum() > 0:
-                # Duruş adlarına göre grupla ve süreleri topla
-                machine_stop_summary = machine_data.groupby("Duruş Adı")["Süre (Dakika)"].sum().reset_index()
                 
-                # Pasta grafiğini oluştur
-                visualize_pie(
-                    machine_stop_summary,
-                    threshold=3,  # %3'ten küçük olanları "Diğer" kategorisinde topla
-                    baslik=f"{machine_code} Duruş Nedenleri",
-                    save=args.save_plots,
-                    show=args.show_plots,
-                    category_column="Duruş Adı"
-                )
-                
-                logger.info(f"{machine_code} tezgahı için duruş nedenleri pasta grafiği oluşturuldu.")        
         
         # OEE ve diğer metrik görselleri
         generate_oee_visuals(df, weeks)
