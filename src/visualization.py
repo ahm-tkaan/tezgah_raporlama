@@ -35,9 +35,9 @@ def ensure_dir(directory: str) -> None:
 
 def visualize_pie(
     data: pd.DataFrame, 
-    threshold: float = 4,  # Eşik değerini artırdık
+    threshold: float = 3.0,
     baslik: str = "Pasta Grafik",
-    save: bool = True,
+    save: bool = True, 
     show: bool = True,
     category_column: str = None
 ) -> None:
@@ -54,17 +54,19 @@ def visualize_pie(
     """
     logger.info(f"Pasta grafik oluşturuluyor: {baslik}")
     
+    # Klasör yolunu belirleme
     if "KISIM" in baslik:
         folder_path = 'Raporlar/Kısımlar/Son Hafta'
     else:
         folder_path = 'Raporlar/Genel'
     
+    # Klasör oluşturma
     ensure_dir(folder_path)
     
-    # Veri çerçevesini kopyala
+    # Veri çerçevesini kopyalama
     data = data.copy()
     
-    # Kategori sütununu belirle
+    # Kategori sütunu belirleme
     if category_column is None:
         # Otomatik olarak kategori sütununu belirle
         if 'Duruş Adı' in data.columns:
@@ -82,22 +84,22 @@ def visualize_pie(
                 logger.error("Veri çerçevesinde kategori sütunu bulunamadı!")
                 return
     
-    # Kategori sütunu olup olmadığını kontrol et
+    # Kategori sütunu kontrolü
     if category_column not in data.columns:
         logger.error(f"Kategori sütunu '{category_column}' veri çerçevesinde bulunamadı!")
         return
     
-    # Toplam süreyi hesapla
+    # Toplam süre hesaplama
     total_time = data["Süre (Dakika)"].sum()
     
-    # Yüzdeleri hesapla
+    # Yüzde hesaplama
     data["Yüzde"] = (data["Süre (Dakika)"] / total_time * 100)
     
-    # Eşik değerinden küçük olanları "Diğer" olarak grupla
+    # Eşik değerinden küçük olanları "Diğer" olarak gruplama
     diger_sure = data[data["Yüzde"] < threshold]["Süre (Dakika)"].sum()
     diger_df = data[data["Yüzde"] >= threshold].copy()
     
-    # "Diğer" satırını yeni DataFrame'e ekle
+    # "Diğer" satırını ekleme
     if diger_sure > 0:
         diger_row = pd.DataFrame({
             category_column: ["Diğer"],
@@ -106,75 +108,90 @@ def visualize_pie(
         })
         diger_df = pd.concat([diger_df, diger_row])
     
-    # Yüzdeye göre sırala
+    # Yüzdeye göre sıralama
     diger_df = diger_df.sort_values("Yüzde", ascending=False)
     
-    # Pasta grafik oluşturma - boyutu büyüttük
-    plt.figure(figsize=(16, 16))
+    # Pasta grafik oluşturma
+    plt.figure(figsize=(12, 12))
     
-    # Patlatma ayarlarını daha akıllı hale getirme
-    myexplode = []
-    for percent in diger_df["Yüzde"]:
-        if percent > 30:  # Büyük dilimler için daha az patlatma
-            myexplode.append(0.05)
-        elif percent < 5:  # Küçük dilimler için daha fazla patlatma
-            myexplode.append(0.2)
-        else:  # Orta boyutlu dilimler için orta düzeyde patlatma
-            myexplode.append(0.1)
-    
-    # Renkleri daha fazla ayırma
+    # Renk paleti
     colors = sns.color_palette("Pastel2", len(diger_df))
+    
+    # Her dilim için explode değeri oluştur
+    explode = [0.03] * len(diger_df)  # Tüm dilimlere 0.03 uzaklık ver
+    
+    # Dilimlerin büyüklüğüne göre explode değerlerini ayarla
+    for i, percent in enumerate(diger_df["Yüzde"]):
+        if percent > 20:  # Büyük dilimler için daha fazla ayırma
+            explode[i] = 0.06
+        elif percent < 5:  # Küçük dilimler için daha az ayırma
+            explode[i] = 0.02
     
     # Pasta grafiği
     wedges, texts, autotexts = plt.pie(
-        diger_df["Süre (Dakika)"], 
-        labels=None,  # Etiketleri kaldırdık, ayrı şekilde ekleyeceğiz
-        wedgeprops=dict(width=0.7),
-        autopct=lambda p: '{:.1f}%'.format(p) if p > threshold else '',
+        diger_df["Süre (Dakika)"],
+        labels=None,  # Etiketleri kaldırıyoruz, ayrı ekleyeceğiz
+        autopct='%1.1f%%',  # Yüzde gösterimi
         startangle=90,
         colors=colors,
-        explode=myexplode,
-        shadow=True
+        shadow=True,
+        explode=explode,  # Dilimler arası boşluğu ayarlayan parametre
+        wedgeprops=dict(width=0.7, edgecolor='gray'),  # Halka grafik için
+        pctdistance=0.85  # Yüzde değerlerinin konumu
     )
     
-    # Etiketleri daha akıllı yerleştirme
+    # Yüzde değerlerinin stilini ayarla
+    for autotext in autotexts:
+        autotext.set_fontsize(9)
+        autotext.set_fontweight('bold')
+    
+    # Etiketleri ekle
     for i, wedge in enumerate(wedges):
+        # Dilimin açı ortasını hesapla
         ang = (wedge.theta2 - wedge.theta1) / 2. + wedge.theta1
         
-        # Dilim yüzdesi ve büyüklüğe göre mesafeyi ayarla
-        percent = diger_df["Yüzde"].iloc[i]
-        if percent > 25:  # Büyük dilimler için daha yakın
-            dist = 1.1
-        elif percent < 5:  # Küçük dilimler için daha uzak
-            dist = 1.9
-        else:  # Orta boyutlu dilimler
-            dist = 1.5
+        # Etiketin konumunu hesapla
+        x = 1.35 * np.cos(np.deg2rad(ang))
+        y = 1.35 * np.sin(np.deg2rad(ang))
         
-        y = np.sin(np.deg2rad(ang)) * dist
-        x = np.cos(np.deg2rad(ang)) * dist
+        # Kategori ve değer bilgisi
+        kategori = diger_df[category_column].iloc[i]
+        deger = int(diger_df["Süre (Dakika)"].iloc[i])
+        etiket = f"{kategori}: {deger} dk"
         
-        # Farklı dilimler için etiketleri farklı yerlere konumlandır
-        # Dilimin bölgesine göre konumu ayarla
-        ha_value = 'center'
-        if x < -0.3:
-            ha_value = 'right'
-        elif x > 0.3:
-            ha_value = 'left'
+        # Etiketin hizalamasını ayarla
+        ha = "center"
+        if x < -0.1:
+            ha = "right"
+        elif x > 0.1:
+            ha = "left"
         
+        # Etiketi çiz
+        plt.annotate(
+            etiket,
+            xy=(x*0.8, y*0.8),  # Ok başlangıcı
+            xytext=(x, y),  # Metin konumu
+            fontsize=10,
+            ha=ha,
+            va="center",
+            bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="gray", alpha=0.8),
+            arrowprops=dict(arrowstyle="-", connectionstyle="arc3,rad=0")
+        )
     
-    plt.title(f"{baslik} Toplam Süre (Dakika)", fontsize=14, pad=15)
-    plt.axis('equal')  # Eşit oranlar için
+    # Başlık ve eksen ayarları
+    plt.title(f"{baslik}", fontsize=14, pad=15)
+    plt.axis('equal')
     
-    # Daha fazla boşluk bırak
-    plt.tight_layout(pad=3.0)
-    
+    # Grafiği kaydet
     if save:
         plt.savefig(os.path.join(folder_path, f"{baslik}.png"), dpi=300, bbox_inches='tight')
         logger.info(f"Grafik kaydedildi: {os.path.join(folder_path, f'{baslik}.png')}")
     
+    # Grafiği göster
     if show:
         plt.show()
     
+    # Grafiği kapat
     plt.close()
 
 def visualize_weekly_comparison(
