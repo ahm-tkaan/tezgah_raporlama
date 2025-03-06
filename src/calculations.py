@@ -205,7 +205,7 @@ def calculate_machine_stop_type_times(df: pd.DataFrame) -> pd.DataFrame:
 
 def filter_sort_top_stops(
     df: pd.DataFrame, 
-    max_week: int, 
+    max_week: int = 9,  # Varsayılan değer 9 olarak değiştirildi
     gozlemlenecek: str = "KISIM"
 ) -> pd.DataFrame:
     """
@@ -213,7 +213,7 @@ def filter_sort_top_stops(
     
     Args:
         df: İşlenecek DataFrame
-        max_week: En son hafta numarası
+        max_week: Sıralama için kullanılacak hafta numarası (varsayılan: 9)
         gozlemlenecek: Gruplandırma için kullanılacak sütun adı (KISIM veya İş Merkezi Kodu)
         
     Returns:
@@ -221,43 +221,81 @@ def filter_sort_top_stops(
     """
     logger.info(f"{gozlemlenecek} için en büyük 10 duruş hesaplanıyor...")
     
-    # 'Gözlemlenecek', 'Hafta' ve 'Duruş Adı' kolonlarına göre gruplandırıp 
-    # 'Süre (Saniye)' kolonunun toplamını hesapla
-    grouped_df = df.groupby([gozlemlenecek, 'Hafta', 'Duruş Adı'])['Süre (Saniye)'].sum().reset_index()
-    grouped_df = grouped_df[grouped_df[gozlemlenecek] != 'Diğer']
+    # Veri setini kontrol et
+    if df.empty:
+        logger.warning("Veri seti boş! Filtreleme yapılamıyor.")
+        return pd.DataFrame()
     
-    # 'Duruş Adı' değerlerini yeniden sınıflandır
-    grouped_df['Duruş Adı'] = grouped_df['Duruş Adı'].apply(
-        lambda x: 'YEMEK MOLASI' if 'YEMEK MOLASI' in x 
-        else ('TASARIM DURUŞLARI' if 'TASARIM' in x else x)
-    )
+    # Gerekli sütunları kontrol et
+    required_columns = [gozlemlenecek, 'Hafta', 'Duruş Adı', 'Süre (Saniye)']
+    for col in required_columns:
+        if col not in df.columns:
+            logger.error(f"Gerekli sütun bulunamadı: {col}")
+            empty_df = pd.DataFrame(columns=required_columns)
+            return empty_df
     
-    # Aynı gözlemlenecek, hafta ve duruş adı altında gruplandırıp, 'Süre (Saniye)' kolonunu topla
-    grouped_df = grouped_df.groupby([gozlemlenecek, 'Hafta', 'Duruş Adı'], as_index=False)['Süre (Saniye)'].sum()
+    try:
+        # 'Gözlemlenecek', 'Hafta' ve 'Duruş Adı' kolonlarına göre gruplandırıp 
+        # 'Süre (Saniye)' kolonunun toplamını hesapla
+        grouped_df = df.groupby([gozlemlenecek, 'Hafta', 'Duruş Adı'])['Süre (Saniye)'].sum().reset_index()
+        
+        # 'Diğer' kısmını filtrele (eğer KISIM sütunu varsa)
+        if gozlemlenecek == 'KISIM':
+            grouped_df = grouped_df[grouped_df[gozlemlenecek] != 'Diğer']
+        
+        # 'Duruş Adı' değerlerini yeniden sınıflandır
+        grouped_df['Duruş Adı'] = grouped_df['Duruş Adı'].apply(
+            lambda x: 'YEMEK MOLASI' if 'YEMEK MOLASI' in x 
+            else ('TASARIM DURUŞLARI' if 'TASARIM' in x else x)
+        )
+        
+        # Aynı gözlemlenecek, hafta ve duruş adı altında gruplandırıp, 'Süre (Saniye)' kolonunu topla
+        grouped_df = grouped_df.groupby([gozlemlenecek, 'Hafta', 'Duruş Adı'], as_index=False)['Süre (Saniye)'].sum()
+        
+        # max_week değerinin geçerli olup olmadığını kontrol et
+        valid_weeks = grouped_df['Hafta'].unique()
+        if max_week not in valid_weeks:
+            logger.warning(f"max_week ({max_week}) geçerli hafta değerleri ({valid_weeks}) içinde değil!")
+            if len(valid_weeks) > 0:
+                # En büyük haftayı kullan
+                max_week = max(valid_weeks)
+                logger.info(f"En büyük hafta ({max_week}) kullanılıyor.")
+            else:
+                logger.error("Geçerli hafta değeri bulunamadı!")
+                return pd.DataFrame()
+        
+        # Maksimum hafta değerine göre filtreleme
+        latest_week_df = grouped_df[grouped_df['Hafta'] == max_week]
+        
+        if latest_week_df.empty:
+            logger.warning(f"Hafta {max_week} için veri bulunamadı!")
+            return pd.DataFrame()
+        
+        # Her gözlemlenecek için en büyük 10 duruşu al
+        top10 = (
+            latest_week_df.sort_values([gozlemlenecek, 'Süre (Saniye)'], ascending=[True, False])
+            .groupby(gozlemlenecek)
+            .head(10)
+            .reset_index(drop=True)
+        )
+        
+        # top_10_duruslar veri setindeki gözlemlenecek ve Duruş Adı sütunlarına göre grouped_df'yi filtrele
+        filtered_df = grouped_df.merge(top10[[gozlemlenecek, 'Duruş Adı']], on=[gozlemlenecek, 'Duruş Adı'])
+        
+        # Veriyi Süre (Saniye) sütununa göre azalan sırada sırala
+        filtered_df = filtered_df.sort_values(by='Süre (Saniye)', ascending=False)
+        
+        # Saniyeden dakikaya çevir
+        filtered_df = second_to_minute(filtered_df)
+        
+        # Sonuç bilgilerini log dosyasına yaz
+        logger.info(f"{gozlemlenecek} için en büyük 10 duruş hesaplaması tamamlandı. Satır sayısı: {len(filtered_df)}")
+        return filtered_df
     
-    # Maksimum hafta değerine göre filtreleme
-    latest_week_df = grouped_df[grouped_df['Hafta'] == max_week]
+    except Exception as e:
+        logger.error(f"filter_sort_top_stops fonksiyonunda hata: {str(e)}", exc_info=True)
+        return pd.DataFrame()
     
-    # Her gözlemlenecek için en büyük 10 duruşu al
-    top10 = (
-        latest_week_df.sort_values([gozlemlenecek, 'Süre (Saniye)'], ascending=[True, False])
-        .groupby(gozlemlenecek)
-        .head(10)
-        .reset_index(drop=True)
-    )
-    
-    # top_10_duruslar veri setindeki gözlemlenecek ve Duruş Adı sütunlarına göre grouped_df'yi filtrele
-    filtered_df = grouped_df.merge(top10[[gozlemlenecek, 'Duruş Adı']], on=[gozlemlenecek, 'Duruş Adı'])
-    
-    # Veriyi Süre (Saniye) sütununa göre azalan sırada sırala
-    filtered_df = filtered_df.sort_values(by='Süre (Saniye)', ascending=False)
-    
-    # Saniyeden dakikaya çevir
-    filtered_df = second_to_minute(filtered_df)
-    
-    logger.info(f"{gozlemlenecek} için en büyük 10 duruş hesaplaması tamamlandı.")
-    return filtered_df
-
 def calculate_part_average_stop_times(
     df: pd.DataFrame,
     kisim: str,

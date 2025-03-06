@@ -35,11 +35,11 @@ def ensure_dir(directory: str) -> None:
 
 def visualize_pie(
     data: pd.DataFrame, 
-    threshold: float = 2, 
+    threshold: float = 4,  # Eşik değerini artırdık
     baslik: str = "Pasta Grafik",
     save: bool = True,
     show: bool = True,
-    category_column: str = None  # Yeni parametre ekleyelim
+    category_column: str = None
 ) -> None:
     """
     Duruş sürelerini pasta grafik olarak görselleştirir.
@@ -106,39 +106,67 @@ def visualize_pie(
         })
         diger_df = pd.concat([diger_df, diger_row])
     
-    # Pasta grafik oluşturma
-    plt.figure(figsize=(12, 12))
-    myexplode = [0.1] * len(diger_df)  # Patlatma ayarları
+    # Yüzdeye göre sırala
+    diger_df = diger_df.sort_values("Yüzde", ascending=False)
+    
+    # Pasta grafik oluşturma - boyutu büyüttük
+    plt.figure(figsize=(16, 16))
+    
+    # Patlatma ayarlarını daha akıllı hale getirme
+    myexplode = []
+    for percent in diger_df["Yüzde"]:
+        if percent > 30:  # Büyük dilimler için daha az patlatma
+            myexplode.append(0.05)
+        elif percent < 5:  # Küçük dilimler için daha fazla patlatma
+            myexplode.append(0.2)
+        else:  # Orta boyutlu dilimler için orta düzeyde patlatma
+            myexplode.append(0.1)
+    
+    # Renkleri daha fazla ayırma
+    colors = sns.color_palette("Pastel2", len(diger_df))
     
     # Pasta grafiği
     wedges, texts, autotexts = plt.pie(
         diger_df["Süre (Dakika)"], 
-        labels=diger_df[category_column],  # Etiketleri doğrudan ver
+        labels=None,  # Etiketleri kaldırdık, ayrı şekilde ekleyeceğiz
         wedgeprops=dict(width=0.7),
-        autopct=lambda p: '{:.1f}%'.format(p) if p > threshold else '',  # threshold'tan küçük yüzdeleri göstermeme
+        autopct=lambda p: '{:.1f}%'.format(p) if p > threshold else '',
         startangle=90,
-        colors=sns.color_palette("Pastel2", len(diger_df)),
+        colors=colors,
         explode=myexplode,
         shadow=True
     )
     
-    # Wedge'lar üzerinde kutucuklarla bilgi ekleme
+    # Etiketleri daha akıllı yerleştirme
     for i, wedge in enumerate(wedges):
         ang = (wedge.theta2 - wedge.theta1) / 2. + wedge.theta1
-        y = np.sin(np.deg2rad(ang)) * 1.2
-        x = np.cos(np.deg2rad(ang)) * 1.6
-    
-        # Ok çizme
-        plt.annotate('', xy=(x*0.75, y*0.95), xytext=(np.cos(np.deg2rad(ang)) * 0.9, np.sin(np.deg2rad(ang)) * 0.9),
-                     arrowprops=dict(arrowstyle='->', color='black', lw=1))
-    
-        # Bilgi kutucuğu ekleme
-        plt.text(x, y, f"{diger_df.iloc[i][category_column]}: {diger_df['Süre (Dakika)'].iloc[i]:.0f} dk", 
-                 ha='center', fontsize=10,
-                 bbox=dict(facecolor='white', alpha=0.5, edgecolor='blue', boxstyle='round,pad=0.5'))
+        
+        # Dilim yüzdesi ve büyüklüğe göre mesafeyi ayarla
+        percent = diger_df["Yüzde"].iloc[i]
+        if percent > 25:  # Büyük dilimler için daha yakın
+            dist = 1.1
+        elif percent < 5:  # Küçük dilimler için daha uzak
+            dist = 1.9
+        else:  # Orta boyutlu dilimler
+            dist = 1.5
+        
+        y = np.sin(np.deg2rad(ang)) * dist
+        x = np.cos(np.deg2rad(ang)) * dist
+        
+        # Farklı dilimler için etiketleri farklı yerlere konumlandır
+        # Dilimin bölgesine göre konumu ayarla
+        ha_value = 'center'
+        if x < -0.3:
+            ha_value = 'right'
+        elif x > 0.3:
+            ha_value = 'left'
+        
     
     plt.title(f"{baslik} Toplam Süre (Dakika)", fontsize=14, pad=15)
     plt.axis('equal')  # Eşit oranlar için
+    
+    # Daha fazla boşluk bırak
+    plt.tight_layout(pad=3.0)
     
     if save:
         plt.savefig(os.path.join(folder_path, f"{baslik}.png"), dpi=300, bbox_inches='tight')
@@ -156,7 +184,8 @@ def visualize_weekly_comparison(
     palet: str = "tab20",
     save: bool = True,
     show: bool = True,
-    sort_by_last_week: bool = True
+    sort_by_last_week: bool = True,
+    target_week: int = 9  # Hedef hafta parametresi ekledik
 ) -> None:
     """
     4 haftalık duruş karşılaştırmasını görselleştirir.
@@ -169,6 +198,7 @@ def visualize_weekly_comparison(
         save: Grafiği kaydetme bayrağı
         show: Grafiği gösterme bayrağı
         sort_by_last_week: Son haftaya göre sıralama bayrağı
+        target_week: Sıralama için kullanılacak hafta numarası (varsayılan: 9)
     """
     logger.info(f"{gozlem} için 4 haftalık karşılaştırma grafikleri oluşturuluyor...")
     
@@ -180,22 +210,29 @@ def visualize_weekly_comparison(
     
     ensure_dir(folder_path)
     
-    # Hafta listesini al ve son haftayı belirle
-    weeks = sorted(df["Hafta"].unique(), reverse=True)
-    last_week = weeks[0] if weeks else None
+    # Hafta listesini al
+    weeks = sorted(df["Hafta"].unique())  # Reverse kaldırıldı, 9. hafta sonda olsun
+    
+    # Hedef hafta mevcut mu kontrol et
+    if target_week in weeks:
+        # Hedef haftayı belirle
+        sort_week = target_week
+    else:
+        # Eğer hedef hafta yoksa, mevcut haftaları kullan
+        sort_week = weeks[-1] if weeks else None
     
     # Her gözlem değeri için grafik oluştur
     for gozlemlenen, data in df.groupby(gozlem):
         plt.figure(figsize=(14, 8))
         
-        # Eğer son haftaya göre sıralama isteniyorsa
-        if sort_by_last_week and last_week:
-            # Son haftaya ait veriyi al
-            last_week_data = data[data['Hafta'] == last_week]
+        # Eğer belirli bir haftaya göre sıralama isteniyorsa
+        if sort_by_last_week and sort_week:
+            # Hedef haftaya ait veriyi al
+            sort_week_data = data[data['Hafta'] == sort_week]
             
-            # Son haftaya göre duruş adlarını sırala
-            if not last_week_data.empty:
-                sorted_stops = last_week_data.sort_values('Süre (Dakika)', ascending=False)['Duruş Adı'].unique()
+            # Hedef haftaya göre duruş adlarını sırala
+            if not sort_week_data.empty:
+                sorted_stops = sort_week_data.sort_values('Süre (Dakika)', ascending=False)['Duruş Adı'].unique()
                 
                 # Tüm duruş adları içinde olmayanları ekle
                 all_stops = data['Duruş Adı'].unique()
@@ -223,8 +260,8 @@ def visualize_weekly_comparison(
         # Her hafta için ayrı çubuk çiz
         bar_width = 0.8 / len(weeks)  # Çubuk genişliği
         
-        # Hafta başına çubuklar
-        for i, week in enumerate(weeks):
+        # Hafta başına çubuklar - Hafta sıralamasını değiştirdik
+        for i, week in enumerate(sorted(weeks)):  # Haftaları küçükten büyüğe sırala
             week_data = category_data[category_data['Hafta'] == week]
             
             # Her kategori için değer bul
@@ -270,6 +307,7 @@ def visualize_weekly_comparison(
         plt.close()
     
     logger.info(f"{gozlem} için 4 haftalık karşılaştırma grafikleri oluşturuldu.")
+
     
 def visualize_bar(
     data: pd.DataFrame, 

@@ -280,18 +280,21 @@ def main() -> None:
         # 4 haftalık kısımlara göre duruş karşılaştırması - çubuk grafik
         visualize_weekly_comparison(
             filtered_kisimlar,
+            egiklik=75,  # Eğiklik değerini 75 olarak ayarla
             sort_by_last_week=True,
+            target_week=9,
             save=args.save_plots, 
             show=args.show_plots
         )
-        
+
         # 4 haftalık tezgahlara göre duruş karşılaştırması - çubuk grafik
         visualize_weekly_comparison(
             filtered_machine, 
             gozlem="İş Merkezi Kodu ", 
-            egiklik=0, 
+            egiklik=75,  # Eğiklik değerini kısım grafikleriyle aynı yap (0 yerine 75)
             palet="Accent",
             sort_by_last_week=True,
+            target_week=9,
             save=args.save_plots, 
             show=args.show_plots
         )

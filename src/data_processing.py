@@ -205,22 +205,39 @@ def process_calisma_data(df: pd.DataFrame) -> pd.DataFrame:
 def add_week_info(df: pd.DataFrame) -> pd.DataFrame:
     """
     DataFrame'e hafta bilgisini ekler.
-    
-    Args:
-        df: İşlenecek DataFrame
-        
-    Returns:
-        pd.DataFrame: Hafta bilgisi eklenmiş DataFrame
     """
     # Orijinal DataFrame'i değiştirmemek için kopyasını oluştur
     result_df = df.copy()
     
+    # NaN değerlerini filtrele
+    result_df = result_df.dropna(subset=['Duruş Başlangıç Tarih'])
+    
     # Tarih sütununu datetime formatına dönüştür (eğer değilse)
     if not pd.api.types.is_datetime64_any_dtype(result_df['Duruş Başlangıç Tarih']):
-        result_df['Duruş Başlangıç Tarih'] = pd.to_datetime(result_df['Duruş Başlangıç Tarih'])
+        try:
+            # Farklı tarih formatlarını deneyerek dönüştürmeyi dene
+            result_df['Duruş Başlangıç Tarih'] = pd.to_datetime(
+                result_df['Duruş Başlangıç Tarih'], 
+                errors='coerce',
+                format=None  # Otomatik format algılama
+            )
+            # NaN oluşmuş satırları temizle
+            result_df = result_df.dropna(subset=['Duruş Başlangıç Tarih'])
+        except Exception as e:
+            logger.error(f"Tarih dönüşümü hatası: {str(e)}")
     
     # Hafta bilgisini ekle
-    result_df['Hafta'] = result_df['Duruş Başlangıç Tarih'].dt.isocalendar().week
+    try:
+        result_df['Hafta'] = result_df['Duruş Başlangıç Tarih'].dt.isocalendar().week
+        # Yıl bilgisini de ekleyelim, farklı yıllar varsa hafta numaraları karışabilir
+        result_df['Yıl'] = result_df['Duruş Başlangıç Tarih'].dt.isocalendar().year
+        # Yıl-Hafta birleşik anahtarı oluştur
+        result_df['YılHafta'] = result_df['Yıl'].astype(str) + "-" + result_df['Hafta'].astype(str)
+    except Exception as e:
+        logger.error(f"Hafta hesaplama hatası: {str(e)}")
+        # Basit bir çözüm olarak varsayılan değer ata
+        result_df['Hafta'] = 1
+        result_df['YılHafta'] = "0000-1"
     
     return result_df
 
@@ -297,66 +314,73 @@ def prepare_data_for_analysis(
 ) -> Tuple[pd.DataFrame, Dict, List[int]]:
     """
     Analiz için veri setini hazırlar.
-    
-    Args:
-        durus_file: Duruş verisi Excel dosyası yolu
-        calisma_file: Çalışma süresi Excel dosyası yolu
-        arizali_file: Arızalı tezgah listesi dosya yolu (opsiyonel)
-        
-    Returns:
-        Tuple[pd.DataFrame, Dict, List[int]]: 
-            - İşlenmiş veri seti
-            - Kısımlara göre tezgah sayıları
-            - Hafta numaraları listesi
     """
     logger.info("Veri hazırlama işlemi başlıyor...")
     
-    # Duruş verilerini yükle
-    durus_df = load_durus_data(durus_file)
-    
-    # Son satırları temizle
-    durus_df = clean_last_rows(durus_df, "İş Merkezi Kodu ")
-    
-    # Süreleri hesapla
-    durus_df = calculate_durations(durus_df)
-    
-    # Çalışma verilerini yükle
-    calisma_df = load_calisma_data(calisma_file)
-    
-    # Son satırları temizle
-    calisma_df = clean_last_rows(calisma_df, "Makina Kodu")
-    
-    # Çalışma verilerini işle
-    calisma_df = process_calisma_data(calisma_df)
-    
-    # Arızalı tezgahları yükle (varsa)
-    arizali_tezgahlar = []
-    if arizali_file:
-        arizali_tezgahlar = load_arizali_tezgahlar(arizali_file)
-    
-    # Arızalı tezgahları filtrele
-    durus_df = filter_by_arizali_tezgahlar(durus_df, arizali_tezgahlar)
-    calisma_df = filter_by_arizali_tezgahlar(calisma_df, arizali_tezgahlar)
-    
-    # Verileri birleştir
-    merged_df = merge_durus_calisma_data(durus_df, calisma_df)
-    
-    # Kısım bilgisini ekle
-    merged_df['KISIM'] = merged_df['İş Merkezi Kodu '].apply(assign_kisim)
-    
-    # Hafta bilgisini ekle
-    merged_df = add_week_info(merged_df)
-    
-    # Hafta numaralarını al ve sırala (son hafta ilk sırada)
-    weeks = sorted(merged_df['Hafta'].unique(), key=lambda x: (x < 10, x), reverse=True)
-    
-    # Arızalı tezgahlardan etkilenen kısımlar için tezgah sayılarını güncelle
-    kisim_tezgah_sayilari = {}
-    for kisim, tezgahlar in KISIMLAR_DICT.items():
-        kisim_tezgah_sayilari[kisim] = len([t for t in tezgahlar if t not in arizali_tezgahlar])
-    
-    logger.info("Veri hazırlama işlemi tamamlandı.")
-    return merged_df, kisim_tezgah_sayilari, weeks
+    try:
+        # Duruş verilerini yükle
+        durus_df = load_durus_data(durus_file)
+        logger.info(f"Duruş verileri yüklendi. Satır sayısı: {len(durus_df)}")
+        
+        # Gerekli sütunları kontrol et
+        required_columns = ["İş Merkezi Kodu ", "Duruş Adı", "Duruş Başlangıç Tarih", "Duruş Bitiş Tarih"]
+        for col in required_columns:
+            if col not in durus_df.columns:
+                logger.error(f"Gerekli sütun bulunamadı: {col}")
+                raise ValueError(f"Duruş verilerinde gerekli sütun bulunamadı: {col}")
+        
+        # Son satırları temizle
+        durus_df = clean_last_rows(durus_df, "İş Merkezi Kodu ")
+        
+        # Süreleri hesapla
+        durus_df = calculate_durations(durus_df)
+        
+        # Çalışma verilerini yükle
+        calisma_df = load_calisma_data(calisma_file)
+        logger.info(f"Çalışma verileri yüklendi. Satır sayısı: {len(calisma_df)}")
+        
+        # Son satırları temizle
+        calisma_df = clean_last_rows(calisma_df, "Makina Kodu")
+        
+        # Çalışma verilerini işle
+        calisma_df = process_calisma_data(calisma_df)
+        
+        # Arızalı tezgahları yükle (varsa)
+        arizali_tezgahlar = []
+        if arizali_file and os.path.exists(arizali_file) and os.path.getsize(arizali_file) > 0:
+            arizali_tezgahlar = load_arizali_tezgahlar(arizali_file)
+        
+        # Arızalı tezgahları filtrele
+        durus_df = filter_by_arizali_tezgahlar(durus_df, arizali_tezgahlar)
+        calisma_df = filter_by_arizali_tezgahlar(calisma_df, arizali_tezgahlar)
+        
+        # Verileri birleştir
+        merged_df = merge_durus_calisma_data(durus_df, calisma_df)
+        logger.info(f"Veriler birleştirildi. Satır sayısı: {len(merged_df)}")
+        
+        # Kısım bilgisini ekle
+        merged_df['KISIM'] = merged_df['İş Merkezi Kodu '].apply(assign_kisim)
+        
+        # Hafta bilgisini ekle (hata ayıklama bilgileriyle)
+        merged_df = add_week_info(merged_df)
+        logger.info(f"Hafta bilgisi eklendi. Benzersiz hafta sayısı: {merged_df['Hafta'].nunique()}")
+        
+        # Hafta numaralarını al ve sırala (son hafta ilk sırada)
+        weeks = sorted(merged_df['Hafta'].unique(), key=lambda x: (x < 10, x), reverse=True)
+        logger.info(f"Sıralanmış hafta listesi: {weeks}")
+        
+        # Arızalı tezgahlardan etkilenen kısımlar için tezgah sayılarını güncelle
+        kisim_tezgah_sayilari = {}
+        for kisim, tezgahlar in KISIMLAR_DICT.items():
+            kisim_tezgah_sayilari[kisim] = len([t for t in tezgahlar if t not in arizali_tezgahlar])
+        
+        logger.info("Veri hazırlama işlemi tamamlandı.")
+        return merged_df, kisim_tezgah_sayilari, weeks
+        
+    except Exception as e:
+        logger.error(f"Veri hazırlama hatası: {str(e)}", exc_info=True)
+        # Boş veri döndürmek yerine hata fırlat
+        raise
 
 def get_latest_week_data(df: pd.DataFrame, weeks: List[int]) -> pd.DataFrame:
     """
